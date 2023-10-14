@@ -41,7 +41,7 @@ int main(int argc,char *argv[])
 {
 	int sockfd = 0;
 	struct sockaddr_ll sa;
-	struct ifreq req,reqMac;
+	struct ifreq req;
 	socklen_t addr_len = sizeof(sa);
 	unsigned char buffer[1024];
 	//struct in_addr myip;
@@ -60,6 +60,11 @@ int main(int argc,char *argv[])
 			print_usage();
 		else if  (strcmp(argv[1], "-l") == 0) 
 		{	
+			if(!argv[2])
+			{
+				print_usage();
+				exit(1);
+			}
 			//Part 1 - Show all of ARP packets.
 			if(strcmp(argv[2], "-a") == 0 )
 			{
@@ -92,62 +97,65 @@ int main(int argc,char *argv[])
 				 }
 
 
-			}else{
+			
+			}else
+			{
 				if((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
-			     {
+			    	{
 					perror("open recv socket error");
 					exit(1);
-					}
+				}
 					
-				while (1) {
-				int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
+				while (1)
+			       	{
+					int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
+					if (num_bytes == -1) 
+					{
+						perror("error!");
+						close(sockfd);
+						exit(1);
+				 	}
 
-				 if (num_bytes == -1) {
-					printf("error!");
-					close(sockfd);
-					exit(1);
-				 }
+					 struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
 
-				 struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
-
-				 if (ntohs(arp->arp_op)== ARPOP_REQUEST){
-					//printf("recive arp reqeuest\n");
-					//print_buffer(buffer,num_bytes);
-					char *target_ip = get_target_protocol_addr(arp);
-					char *sender_ip = get_sender_protocol_addr(arp);
-					if(strcmp(argv[2],target_ip) == 0)
-						printf("Get ARP packet - who has %s ? Tell %s\n",target_ip,sender_ip);
+					 if (ntohs(arp->arp_op)== ARPOP_REQUEST)
+					 {
+						//printf("recive arp reqeuest\n");
+						//print_buffer(buffer,num_bytes);
+						char *target_ip = get_target_protocol_addr(arp);
+						char *sender_ip = get_sender_protocol_addr(arp);
+						if(strcmp(argv[2],target_ip) == 0)
+							printf("Get ARP packet - who has %s ? Tell %s\n",target_ip,sender_ip);
 				 	
-					free(target_ip);
-				 	free(sender_ip);
+						free(target_ip);
+				 		free(sender_ip);
+				 	}
 				 }
-				
-				 }
-
 			}
-
-		} 
-		else if (strcmp(argv[1], "-q") == 0){
+		} else if (strcmp(argv[1], "-q") == 0)
+		{
 			struct arp_packet fp;
-			//struct ether_header *eth;
-			//struct ether_arp *arp_request;
+			if (!argv[2])
+			{
+				print_usage();
+				exit(1);
+			}
 			if ((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
 			{
-					printf("open recv socket error");
-					exit(1);
+				perror("open recv socket error");
+				exit(1);
 			}
 			strncpy(req.ifr_name, DEVICE_NAME, IFNAMSIZ - 1);
-			strncpy(reqMac.ifr_name, DEVICE_NAME, IFNAMSIZ - 1);
+			//ioctl to get IP address (SIOCGIFADDR)
+			if (ioctl(sockfd,SIOCGIFADDR,&req)<0)
+				perror("ioctl failed");
 			
-			if (ioctl(sockfd,SIOCGIFADDR,&req)<0){
-				printf("ioctl failed");
-			}
 			struct sockaddr_in *addr = (struct sockaddr_in *)&req.ifr_addr;
-			//MAC address
-			if (ioctl(sockfd,SIOCGIFHWADDR,&reqMac)<0){
-				printf("ioctl failed");
-			}
-			struct ether_addr *mac = (struct ether_addr *)&reqMac.ifr_hwaddr.sa_data;
+			//ioctl to get MAC address (SIOCGIFHWADDR) 
+			if (ioctl(sockfd,SIOCGIFHWADDR,&req)<0)
+				perror("ioctl failed");
+			struct ether_addr *mac = (struct ether_addr *)&req.ifr_hwaddr.sa_data;
+			
 			memcpy(fp.eth_hdr.ether_dhost,"\xFF\xFF\xFF\xFF\xFF\xFF",ETH_ALEN);
 			memcpy(fp.eth_hdr.ether_shost,mac->ether_addr_octet,ETH_ALEN);
 			fp.eth_hdr.ether_type = htons(ETH_P_ARP);
@@ -157,36 +165,38 @@ int main(int argc,char *argv[])
 			set_prot_size(&fp.arp,4);
 			set_op_code(&fp.arp,ARPOP_REQUEST);
 			set_sender_hardware_addr(&fp.arp,mac->ether_addr_octet);
-			
 			set_sender_protocol_addr(&fp.arp,inet_ntoa(addr->sin_addr));
 			set_target_protocol_addr(&fp.arp,argv[2]);
 			set_target_hardware_addr(&fp.arp,"\xFF\xFF\xFF\xFF\xFF\xFF");
+			
 			memset(&sa,0,sizeof(sa));
 			sa.sll_ifindex = if_nametoindex(DEVICE_NAME);
 			sa.sll_protocol = htons(ETH_P_ARP);
+			
 			sendto(sockfd,&fp,sizeof(fp), 0, (struct sockaddr *)&sa, sizeof(sa));
+			
 			int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
+			if (num_bytes == -1) 
+			{
+				perror("error!");
+				close(sockfd);
+				exit(1);
+			}
 
-				 if (num_bytes == -1) {
-					printf("error!");
-					close(sockfd);
-					exit(1);
-				 }
+			struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
 
-				 struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
-
-				 if (ntohs(arp->arp_op)== ARPOP_REPLY){
-					//printf("recive arp reqeuest\n");
-					//print_buffer(buffer,num_bytes);
-					char *sender_mac = get_sender_hardware_addr(arp);
-					char *sender_ip = get_sender_protocol_addr(arp);
+			if (ntohs(arp->arp_op)== ARPOP_REPLY)
+			{
+				//printf("recive arp reqeuest\n");
+				//print_buffer(buffer,num_bytes);
+				char *sender_mac = get_sender_hardware_addr(arp);
+				char *sender_ip = get_sender_protocol_addr(arp);
 					
-					printf("MAC address of %s is %s\n",sender_ip,sender_mac);
+				printf("MAC address of %s is %s\n",sender_ip,sender_mac);
 				 	
-					free(sender_mac);
-				 	free(sender_ip);
-					
-				 }
+				free(sender_mac);
+				free(sender_ip);
+			 }
 			
 			
 		}
@@ -199,27 +209,32 @@ int main(int argc,char *argv[])
 			}
 		
 			int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
-			if (num_bytes == -1) {
-				printf("error!");
+			if (num_bytes == -1) 
+			{
+				perror("error!");
 				close(sockfd);
 				exit(1);
 			}
 
 			struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
-			
-			if (ntohs(arp->arp_op)== ARPOP_REQUEST){
-				//printf("recive arp reqeuest\n");
-				//print_buffer(buffer,num_
+			if (ntohs(arp->arp_op)== ARPOP_REQUEST)
+			{
 				struct arp_packet fp;	
 				char *target_ip=get_target_protocol_addr(arp);
-				if(strcmp(argv[2],target_ip) == 0){
+				if(strcmp(argv[2],target_ip) == 0)
+				{
 					char *sender_ip = get_sender_protocol_addr(arp);
 					char *sender_mac=get_sender_hardware_addr(arp);
 					
 					printf("Get ARP packet - Who has %s ?    tell %s.\n",target_ip,sender_ip);
 					
+					strncpy(req.ifr_name, DEVICE_NAME, IFNAMSIZ - 1);					
+					if(ioctl(sockfd, SIOCGIFHWADDR, &req)<0)
+						perror("ioctl failed");
+					struct ether_addr *mac = (struct ether_addr *)&req.ifr_hwaddr.sa_data;
+
 					memcpy(fp.eth_hdr.ether_dhost,sender_mac,ETH_ALEN);
-					memcpy(fp.eth_hdr.ether_shost,"\x08\x00\x27\xE9\x21\x4D",ETH_ALEN);
+					memcpy(fp.eth_hdr.ether_shost,mac->ether_addr_octet,ETH_ALEN);
 					fp.eth_hdr.ether_type = htons(ETH_P_ARP);
 					set_hard_type(&fp.arp,ARPHRD_ETHER);
 					set_prot_type(&fp.arp,ETH_P_IP);
@@ -236,11 +251,18 @@ int main(int argc,char *argv[])
 					memset(&sa,0,sizeof(sa));
 					sa.sll_ifindex = if_nametoindex(DEVICE_NAME);
 					sa.sll_protocol = htons(ETH_P_ARP);
+
 					int sent_bytes=sendto(sockfd,&fp,sizeof(fp), 0, (struct sockaddr *)&sa, sizeof(sa));
-					if (sent_bytes == -1){
+					if (sent_bytes == -1)
+					{
 						perror("sendto failed\n");
-					}else{
-						printf("Send successfull!\n");
+						free(sender_mac);
+						free(sender_ip);
+						close(sockfd);
+						exit(1);
+					}else
+					{
+						printf("Send successfully.\n");
 					}
 					
 					free(sender_mac);
@@ -255,28 +277,6 @@ int main(int argc,char *argv[])
 	}
 
 
-
-	/*
-	 * Use ioctl function binds the send socket and the Network Interface Card.
-`	 * ioctl( ... )
-	 */
-	
-	
-
-	
-	// Fill the parameters of the sa.
-
-
-
-	
-	/*
-	 * use sendto function with sa variable to send your packet out
-	 * sendto( ... )
-	 */
-	
-	
-	
-	
 	close(sockfd);
 	return 0;
 	
