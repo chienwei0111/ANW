@@ -39,7 +39,7 @@ void print_buffer(const unsigned char *bufer,int lingth){
 }
 int main(int argc,char *argv[])
 {
-	int sockfd = 0;
+	int sockfd = 0,specific=0;
 	struct sockaddr_ll sa;
 	struct ifreq req;
 	socklen_t addr_len = sizeof(sa);
@@ -55,8 +55,10 @@ int main(int argc,char *argv[])
 
 	if (argc > 1 )
 	{
+		if (!argv[1])
+			print_usage();
 		//Part 1 - Show the detail of the option.
-		if  (strcmp(argv[1], "-help") == 0 )
+		if (strcmp(argv[1], "-help") == 0 )
 			print_usage();
 		else if  (strcmp(argv[1], "-l") == 0) 
 		{	
@@ -66,71 +68,39 @@ int main(int argc,char *argv[])
 				exit(1);
 			}
 			//Part 1 - Show all of ARP packets.
-			if(strcmp(argv[2], "-a") == 0 )
-			{
-				//Create a socket.
-				if((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
-			 	{
-					perror("open recv socket error");
-					exit(1);
-				}
-				while(1)
-				{
-					int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
-					if (num_bytes == -1) 
-					{
-						perror("recvfrom failed");
-						close(sockfd);
-						exit(1);
-				 	}
-					//Because the received data is stored in buffer
-				 	struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
-
-				 	if (ntohs(arp->arp_op)== ARPOP_REQUEST)
-					{
-						//printf("recive arp reqeuest\n");
-						//print_buffer(buffer,num_bytes);
-						char *target_ip = get_target_protocol_addr(arp);
-						char *sender_ip = get_sender_protocol_addr(arp);
-						printf("Get ARP packet - who has %s ? Tell %s\n",target_ip,sender_ip);
-					}
-				 }
-
-
+			if(strcmp(argv[2], "-a"))
+				specific = 1;
 			
-			}else
+			//Create a socket.
+			if((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
 			{
-				if((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
-			    	{
-					perror("open recv socket error");
+				perror("open recv socket error");
+				exit(1);
+			}
+			while(1)
+			{
+				int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
+				if (num_bytes == -1) 
+				{
+					perror("recvfrom failed");
+					close(sockfd);
 					exit(1);
-				}
-					
-				while (1)
-			       	{
-					int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
-					if (num_bytes == -1) 
+				 }
+				//Because the received data is stored in buffer
+				 struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
+
+				if (ntohs(arp->arp_op)== ARPOP_REQUEST)
+				{
+					char *target_ip = get_target_protocol_addr(arp);
+					char *sender_ip = get_sender_protocol_addr(arp);
+					if(specific==1)
 					{
-						perror("error!");
-						close(sockfd);
-						exit(1);
-				 	}
-
-					 struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
-
-					 if (ntohs(arp->arp_op)== ARPOP_REQUEST)
-					 {
-						//printf("recive arp reqeuest\n");
-						//print_buffer(buffer,num_bytes);
-						char *target_ip = get_target_protocol_addr(arp);
-						char *sender_ip = get_sender_protocol_addr(arp);
 						if(strcmp(argv[2],target_ip) == 0)
 							printf("Get ARP packet - who has %s ? Tell %s\n",target_ip,sender_ip);
-				 	
-						free(target_ip);
-				 		free(sender_ip);
-				 	}
-				 }
+					}else
+						printf("Get ARP packet - who has %s ? Tell %s\n",target_ip,sender_ip);
+
+				}	
 			}
 		} else if (strcmp(argv[1], "-q") == 0)
 		{
@@ -150,7 +120,7 @@ int main(int argc,char *argv[])
 			if (ioctl(sockfd,SIOCGIFADDR,&req)<0)
 				perror("ioctl failed");
 			
-			struct sockaddr_in *addr = (struct sockaddr_in *)&req.ifr_addr;
+			struct sockaddr_in *addr= (struct sockaddr_in *)&req.ifr_addr;
 			//ioctl to get MAC address (SIOCGIFHWADDR) 
 			if (ioctl(sockfd,SIOCGIFHWADDR,&req)<0)
 				perror("ioctl failed");
@@ -164,7 +134,7 @@ int main(int argc,char *argv[])
 			set_hard_size(&fp.arp,ETH_ALEN);
 			set_prot_size(&fp.arp,4);
 			set_op_code(&fp.arp,ARPOP_REQUEST);
-			set_sender_hardware_addr(&fp.arp,mac->ether_addr_octet);
+			set_sender_hardware_addr(&fp.arp,(char *)mac->ether_addr_octet);
 			set_sender_protocol_addr(&fp.arp,inet_ntoa(addr->sin_addr));
 			set_target_protocol_addr(&fp.arp,argv[2]);
 			set_target_hardware_addr(&fp.arp,"\xFF\xFF\xFF\xFF\xFF\xFF");
@@ -225,27 +195,26 @@ int main(int argc,char *argv[])
 				{
 					char *sender_ip = get_sender_protocol_addr(arp);
 					char *sender_mac=get_sender_hardware_addr(arp);
-					
-					printf("Get ARP packet - Who has %s ?    tell %s.\n",target_ip,sender_ip);
+					uint8_t *macAddress = convert_string_to_uint8(argv[1]);	
+					printf("Get ARP packet - Who has %s ?	tell %s.\n",target_ip,sender_ip);
 					
 					strncpy(req.ifr_name, DEVICE_NAME, IFNAMSIZ - 1);					
 					if(ioctl(sockfd, SIOCGIFHWADDR, &req)<0)
 						perror("ioctl failed");
-					struct ether_addr *mac = (struct ether_addr *)&req.ifr_hwaddr.sa_data;
-
-					memcpy(fp.eth_hdr.ether_dhost,sender_mac,ETH_ALEN);
-					memcpy(fp.eth_hdr.ether_shost,mac->ether_addr_octet,ETH_ALEN);
+					
+					memcpy(fp.eth_hdr.ether_dhost,arp->arp_sha,ETH_ALEN);
+					memcpy(fp.eth_hdr.ether_shost,req.ifr_hwaddr.sa_data,ETH_ALEN);
 					fp.eth_hdr.ether_type = htons(ETH_P_ARP);
 					set_hard_type(&fp.arp,ARPHRD_ETHER);
 					set_prot_type(&fp.arp,ETH_P_IP);
 					set_hard_size(&fp.arp,ETH_ALEN);
 					set_prot_size(&fp.arp,4);
 					set_op_code(&fp.arp,ARPOP_REPLY);
-					set_sender_hardware_addr(&fp.arp,argv[1]);
+					set_sender_hardware_addr(&fp.arp,(char *)macAddress);
 					set_sender_protocol_addr(&fp.arp,target_ip);
 					set_target_protocol_addr(&fp.arp,sender_ip);
-					set_target_hardware_addr(&fp.arp,sender_mac);
-					
+					set_target_hardware_addr(&fp.arp,(char *)arp->arp_sha);
+					//print_buffer((unsigned char *)macAddress,sizeof(macAddress));	
 					printf ("Sent ARP Replay : %s is %s\n",target_ip,argv[1]);
 					
 					memset(&sa,0,sizeof(sa));

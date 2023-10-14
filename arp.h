@@ -8,7 +8,7 @@ struct arp_packet
 	struct ether_header eth_hdr;
 	struct ether_arp arp;
 };
-
+uint8_t* convert_string_to_uint8(char * string);
 void print_usage();
 
 
@@ -18,7 +18,7 @@ void set_hard_size(struct ether_arp *packet, unsigned char size);
 void set_prot_size(struct ether_arp *packet, unsigned char size);
 void set_op_code(struct ether_arp *packet, short int code);
 
-void set_sender_hardware_addr(struct ether_arp *packet, char *address);
+void set_sender_hardware_addr(struct ether_arp *packet,  char *address);
 void set_sender_protocol_addr(struct ether_arp *packet, char *address);
 void set_target_hardware_addr(struct ether_arp *packet, char *address);
 void set_target_protocol_addr(struct ether_arp *packet, char *address);
