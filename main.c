@@ -43,51 +43,55 @@ int main(int argc,char *argv[])
 	struct sockaddr_ll sa;
 	struct ifreq req,reqMac;
 	socklen_t addr_len = sizeof(sa);
-	unsigned char buffer[1024],buffer1[30];
+	unsigned char buffer[1024];
 	//struct in_addr myip;
+	//Part 1 - Check if the current user is root.
 	uid_t uid =geteuid();
-
-	if (uid != 0){
+	if (uid != 0)
+	{
 		printf("Error, You must be root use tool!\n");
 		return 1;
 	}
 
-	if (argc > 1 ){
+	if (argc > 1 )
+	{
+		//Part 1 - Show the detail of the option.
 		if  (strcmp(argv[1], "-help") == 0 )
 			print_usage();
 		else if  (strcmp(argv[1], "-l") == 0) 
-		{
+		{	
+			//Part 1 - Show all of ARP packets.
 			if(strcmp(argv[2], "-a") == 0 )
 			{
-			if((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
-			 {
-				perror("open recv socket error");
-				exit(1);
-			}
-
-			while (1) {
-				int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
-
-				 if (num_bytes == -1) {
-					printf("error!");
-					close(sockfd);
+				//Create a socket.
+				if((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
+			 	{
+					perror("open recv socket error");
 					exit(1);
+				}
+				while(1)
+				{
+					int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
+					if (num_bytes == -1) 
+					{
+						perror("recvfrom failed");
+						close(sockfd);
+						exit(1);
+				 	}
+					//Because the received data is stored in buffer
+				 	struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
+
+				 	if (ntohs(arp->arp_op)== ARPOP_REQUEST)
+					{
+						//printf("recive arp reqeuest\n");
+						//print_buffer(buffer,num_bytes);
+						char *target_ip = get_target_protocol_addr(arp);
+						char *sender_ip = get_sender_protocol_addr(arp);
+						printf("Get ARP packet - who has %s ? Tell %s\n",target_ip,sender_ip);
+					}
 				 }
 
-				 struct ether_arp *arp = (struct ether_arp *)(buffer + 14);
 
-				 if (ntohs(arp->arp_op)== ARPOP_REQUEST){
-					//printf("recive arp reqeuest\n");
-					//print_buffer(buffer,num_bytes);
-					char *target_ip = get_target_protocol_addr(arp);
-					char *sender_ip = get_sender_protocol_addr(arp);
-					printf("Get ARP packet - who has %s ? Tell %s\n",target_ip,sender_ip);
-
-				 }
-
-
-			}
-			
 			}else{
 				if((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
 			     {
@@ -134,6 +138,7 @@ int main(int argc,char *argv[])
 			}
 			strncpy(req.ifr_name, DEVICE_NAME, IFNAMSIZ - 1);
 			strncpy(reqMac.ifr_name, DEVICE_NAME, IFNAMSIZ - 1);
+			
 			if (ioctl(sockfd,SIOCGIFADDR,&req)<0){
 				printf("ioctl failed");
 			}
@@ -143,31 +148,23 @@ int main(int argc,char *argv[])
 				printf("ioctl failed");
 			}
 			struct ether_addr *mac = (struct ether_addr *)&reqMac.ifr_hwaddr.sa_data;
-			sprintf(buffer1,"\\x%02X\\x%02X\\x%02X\\x%02X\\x%02X\\x%02X",
-				mac->ether_addr_octet[0],mac->ether_addr_octet[1],
-				mac->ether_addr_octet[2],mac->ether_addr_octet[3],
-				mac->ether_addr_octet[4],mac->ether_addr_octet[5]);
-			printf("%s",buffer1);
-			print_buffer(buffer1,sizeof(buffer1));
 			memcpy(fp.eth_hdr.ether_dhost,"\xFF\xFF\xFF\xFF\xFF\xFF",ETH_ALEN);
-			memcpy(fp.eth_hdr.ether_shost,"\x08\x00\x27\xE9\x21\x4D",ETH_ALEN);
+			memcpy(fp.eth_hdr.ether_shost,mac->ether_addr_octet,ETH_ALEN);
 			fp.eth_hdr.ether_type = htons(ETH_P_ARP);
 			set_hard_type(&fp.arp,ARPHRD_ETHER);
 			set_prot_type(&fp.arp,ETH_P_IP);
 			set_hard_size(&fp.arp,ETH_ALEN);
 			set_prot_size(&fp.arp,4);
 			set_op_code(&fp.arp,ARPOP_REQUEST);
-			set_sender_hardware_addr(&fp.arp,"\x08\x00\x27\xE9\x21\x4D");
+			set_sender_hardware_addr(&fp.arp,mac->ether_addr_octet);
 			
 			set_sender_protocol_addr(&fp.arp,inet_ntoa(addr->sin_addr));
 			set_target_protocol_addr(&fp.arp,argv[2]);
 			set_target_hardware_addr(&fp.arp,"\xFF\xFF\xFF\xFF\xFF\xFF");
-
 			memset(&sa,0,sizeof(sa));
 			sa.sll_ifindex = if_nametoindex(DEVICE_NAME);
 			sa.sll_protocol = htons(ETH_P_ARP);
 			sendto(sockfd,&fp,sizeof(fp), 0, (struct sockaddr *)&sa, sizeof(sa));
-			
 			int num_bytes = recvfrom(sockfd, buffer,sizeof(buffer),0,(struct sockaddr *)&sa, &addr_len);
 
 				 if (num_bytes == -1) {
@@ -259,7 +256,6 @@ int main(int argc,char *argv[])
 
 
 
-	
 	/*
 	 * Use ioctl function binds the send socket and the Network Interface Card.
 `	 * ioctl( ... )
@@ -280,9 +276,9 @@ int main(int argc,char *argv[])
 	
 	
 	
-
-	close(sockfd);
+	
 	close(sockfd);
 	return 0;
+	
 }
 
